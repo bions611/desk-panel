@@ -465,6 +465,10 @@ h1,h2,h3{font-weight:650;letter-spacing:.01em}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M9 7h6M9 11h6"/></svg><span class="nav-label">图书馆</span>
       </a>
     </nav>
+    <button class="nav-item" id="sync-btn" style="display:none;width:100%;text-align:left;cursor:pointer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      <span class="nav-label">同步到电脑</span>
+    </button>
     <div class="nav-foot">
       <div><span class="dot"></span><span id="datapath">数据存在电脑上的文件里</span></div>
       <div style="margin-top:10px"><a class="btn ghost sm" id="export-btn" href="/api/export" style="display:inline-flex;align-items:center;text-decoration:none">导出备份</a></div>
@@ -661,6 +665,9 @@ h1,h2,h3{font-weight:650;letter-spacing:.01em}
 
 <div class="toast" id="toast"></div>
 
+<!-- 手机与电脑对账用的合并函数（纯函数，电脑上加载了也不会执行） -->
+<script src="merge.js"></script>
+
 <script>
 "use strict";
 /* ===== 数据层 =====
@@ -669,6 +676,14 @@ h1,h2,h3{font-weight:650;letter-spacing:.01em}
 const KEY = "lifeworkbench.v1";
 let store = def();
 let serverReady = false;
+
+/* ===== 同一份页面，跑在两个地方 =====
+   电脑上：http://127.0.0.1:8750 —— 直接读写电脑上的数据文件，用法跟以前一模一样
+   手机上：GitHub Pages 的地址   —— 数据先存在手机里，回家点"同步"再并进电脑 */
+const IS_LOCAL = (location.hostname === "127.0.0.1" || location.hostname === "localhost");
+/* 手机同步时要连的电脑地址（回家在手机上可改，存在手机里） */
+const PC_BASE_DEFAULT = "http://192.168.161.94:8750";
+function pcBase(){ return IS_LOCAL ? "" : (localStorage.getItem("pcBase") || PC_BASE_DEFAULT); }
 
 function def(){
   return { workouts:{}, todos:[], notes:[], books:[] };
@@ -682,14 +697,16 @@ function isEmptyStore(s){
 function lsRead(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; } }
 function lsWrite(o){ try{ localStorage.setItem(KEY, JSON.stringify(o)); }catch(e){} }
 
+/* 手机连电脑时浏览器会先问一次"允许访问本地网络吗"，targetAddressSpace 是给它的说明 */
 async function fetchData(){
-  const r = await fetch("/api/data", {cache:"no-store"});
+  const r = await fetch(pcBase() + "/api/data", {cache:"no-store", targetAddressSpace:"local"});
   if(!r.ok) throw new Error("HTTP "+r.status);
   return await r.json();
 }
 async function pushData(o){
-  const r = await fetch("/api/data", {
-    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(o)
+  const r = await fetch(pcBase() + "/api/data", {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(o),
+    targetAddressSpace:"local"
   });
   if(!r.ok) throw new Error("HTTP "+r.status);
   return true;
@@ -698,6 +715,24 @@ async function pushData(o){
 /* 首次打开时：把浏览器里已有的旧数据搬进数据文件，一条不丢 */
 async function dataLayerInit(){
   const local = lsRead();
+
+  /* ---- 手机版：一切以手机里这份为准 ----
+     手机不往电脑自动推，只有回家点"同步"才并过去；只有第一次用（手机里空的）才从电脑取一份。 */
+  if(!IS_LOCAL){
+    store = Object.assign(def(), local || {});
+    serverReady = false;
+    if(isEmptyStore(store)){
+      try{
+        store = Object.assign(def(), await fetchData());
+        lsWrite(store);
+        toast("已从电脑取回一份数据");
+      }catch(e){ /* 连不上电脑就空着，属于正常情况 */ }
+    }
+    const el0 = document.getElementById("datapath");
+    if(el0) el0.textContent = "数据存在这台手机里";
+    return;
+  }
+
   try{
     const d = await fetchData();
     store = Object.assign(def(), d || {});
@@ -725,6 +760,29 @@ function save(){
   lsWrite(store);                       // 顺手留一份兜底副本
   if(!serverReady) return;
   pushData(store).catch(()=>{ toast("这次没存进文件，请检查数据服务"); });
+}
+
+/* ===== 回家同步（只在手机上用）=====
+   规则：电脑那份是主账本 —— 手机记的并进去，电脑上已有的绝不被手机覆盖。
+   手机同步后不清空，在外面还能翻历史。 */
+async function syncNow(){
+  const btn = document.getElementById("sync-btn");
+  if(btn) btn.disabled = true;
+  try{
+    const pcData = await fetchData();                     // 电脑那份
+    const clash  = listPhoneOnlyConflicts(pcData, store); // 两边都记过的（只提示，不改结果）
+    const merged = mergeStore(pcData, store);             // 电脑优先 + 手机补空缺
+    await pushData(merged);                               // 写回电脑
+    store = merged; lsWrite(store);                       // 手机上留合并后的完整一份
+    if(typeof render === "function") render(routeNow());
+    toast(clash.length
+      ? "同步完成；有 " + clash.length + " 处两边都记过，按电脑上的为准"
+      : "同步完成，手机记的已并进电脑");
+  }catch(e){
+    toast("没连上电脑 —— 确认手机和电脑连的是同一个 WiFi、电脑开着，浏览器问「允许访问本地网络」时点了允许");
+  }finally{
+    if(btn) btn.disabled = false;
+  }
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
 function fmtDate(d){
@@ -1656,6 +1714,18 @@ document.getElementById("todo-today").addEventListener("click",()=>{ curTodo=tod
 
 /* ===== 启动 ===== */
 dataLayerInit().then(async()=>{ await loadSettings(); calInit(); route(); });
+
+/* ===== 手机版专属：亮出"同步"按钮，并打开离线缓存 ===== */
+if(!IS_LOCAL){
+  const sb = document.getElementById("sync-btn");
+  if(sb){
+    sb.style.display = "";
+    sb.addEventListener("click", ()=>{ closeSidebar(); syncNow(); });
+  }
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  }
+}
 </script>
 </body>
 </html>
