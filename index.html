@@ -697,9 +697,16 @@ function isEmptyStore(s){
 function lsRead(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; } }
 function lsWrite(o){ try{ localStorage.setItem(KEY, JSON.stringify(o)); }catch(e){} }
 
-/* 手机连电脑时浏览器会先问一次"允许访问本地网络吗"，targetAddressSpace 是给它的说明 */
-async function fetchData(){
-  const r = await fetch(pcBase() + "/api/data", {cache:"no-store", targetAddressSpace:"local"});
+/* 手机连电脑时浏览器会先问一次"允许访问本地网络吗"，targetAddressSpace 是给它的说明。
+   timeoutMs：连不上电脑时别把页面卡死 —— 在外面连不上是常态。 */
+async function fetchData(timeoutMs){
+  const opts = {cache:"no-store", targetAddressSpace:"local"};
+  if(timeoutMs){
+    const ac = new AbortController();
+    opts.signal = ac.signal;
+    setTimeout(()=>ac.abort(), timeoutMs);
+  }
+  const r = await fetch(pcBase() + "/api/data", opts);
   if(!r.ok) throw new Error("HTTP "+r.status);
   return await r.json();
 }
@@ -722,11 +729,16 @@ async function dataLayerInit(){
     store = Object.assign(def(), local || {});
     serverReady = false;
     if(isEmptyStore(store)){
-      try{
-        store = Object.assign(def(), await fetchData());
-        lsWrite(store);
-        toast("已从电脑取回一份数据");
-      }catch(e){ /* 连不上电脑就空着，属于正常情况 */ }
+      /* 第一次用：背后问问电脑有没有数据。连不上就当空着（在外面连不上是常态），
+         绝不 await —— 不能因为连不上电脑就把页面卡成白屏。 */
+      fetchData(3000).then(function(d){
+        if(isEmptyStore(store)){
+          store = Object.assign(def(), d || {});
+          lsWrite(store);
+          if(typeof render === "function") render(routeNow());
+          toast("已从电脑取回一份数据");
+        }
+      }).catch(function(){});
     }
     const el0 = document.getElementById("datapath");
     if(el0) el0.textContent = "数据存在这台手机里";
@@ -769,7 +781,7 @@ async function syncNow(){
   const btn = document.getElementById("sync-btn");
   if(btn) btn.disabled = true;
   try{
-    const pcData = await fetchData();                     // 电脑那份
+    const pcData = await fetchData(8000);                 // 电脑那份（连不上就 8 秒放弃）
     const clash  = listPhoneOnlyConflicts(pcData, store); // 两边都记过的（只提示，不改结果）
     const merged = mergeStore(pcData, store);             // 电脑优先 + 手机补空缺
     await pushData(merged);                               // 写回电脑
