@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>连接测试</title>
+<style>body{font:15px/1.7 -apple-system,"Microsoft YaHei",sans-serif;padding:16px;background:#F7F9F4;color:#22302a}
+h3{margin:0 0 8px}#out{font-size:18px;font-weight:700;margin:10px 0}
+pre{white-space:pre-wrap;word-break:break-all;background:#fff;border:1px solid #dfe7dc;border-radius:10px;padding:10px;font-size:13px}</style>
+</head>
+<body>
+<h3>手机 ↔ 电脑 连接测试</h3>
+<div id="out">测试中…（约 10 秒）</div>
+<pre id="detail"></pre>
+<script>
+var TARGET = "http://192.168.161.94:8750/api/data";
+var out = document.getElementById("out"), detail = document.getElementById("detail"), lines = [];
+function log(s){ lines.push(s); detail.textContent = lines.join("\n"); }
+log("页面来源 : " + location.origin);
+log("目标地址 : " + TARGET);
+log("浏览器   : " + navigator.userAgent);
+log("");
+
+fetch(TARGET, {cache:"no-store", targetAddressSpace:"local"})
+  .then(function(r){
+    log("① 带 targetAddressSpace：成功 HTTP " + r.status);
+    return r.json().then(function(j){
+      var ks = Object.keys(j.workouts||{}).sort();
+      log("   读到数据，共 " + ks.length + " 天，最后一天 " + ks[ks.length-1]);
+      out.textContent = "✅ 通了（浏览器允许访问电脑）";
+    });
+  })
+  .catch(function(e){
+    log("① 带 targetAddressSpace：失败");
+    log("   错误名 : " + e.name);
+    log("   错误信息: " + e.message);
+    return fetch(TARGET + "?p=1", {cache:"no-store", mode:"cors"})
+      .then(function(r2){ log("② 不带该选项：成功 HTTP " + r2.status); })
+      .catch(function(e2){
+        log("② 不带该选项：也失败");
+        log("   错误名 : " + e2.name);
+        log("   错误信息: " + e2.message);
+        out.textContent = "❌ 被浏览器挡住了（下面第①条错误名就是原因）";
+      });
+  })
+  .then(function(){
+    log("");
+    log("LNA(本地网络访问) 支持: " + (("localNetworkAccess" in navigator) ? "有" : "无"));
+    log("测试结束 " + new Date().toLocaleTimeString());
+    if(out.textContent.indexOf("测试中") === 0) out.textContent = "结果见下方";
+  });
+</script>
+</body>
+</html>
