@@ -467,7 +467,7 @@ h1,h2,h3{font-weight:650;letter-spacing:.01em}
     </nav>
     <button class="nav-item" id="sync-btn" style="display:none;width:100%;text-align:left;cursor:pointer">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
-      <span class="nav-label">同步到电脑</span>
+      <span class="nav-label">和电脑同步</span>
     </button>
     <div id="pc-addr" style="display:none;margin:2px 0 8px;padding:0 14px;font-size:11px;line-height:1.5;color:var(--side-foot);cursor:pointer;word-break:break-all"></div>
     <div class="nav-foot">
@@ -702,6 +702,10 @@ function lsWrite(o){ try{ localStorage.setItem(KEY, JSON.stringify(o)); }catch(e
 const BASE_KEY = "lifeworkbench.base.v1";
 function baseRead(){ try{ return JSON.parse(localStorage.getItem(BASE_KEY)); }catch(e){ return null; } }
 function baseWrite(o){ try{ localStorage.setItem(BASE_KEY, JSON.stringify(o)); }catch(e){} }
+/* 上次同步的时间（显示给手机上的人看，免得不知道同步过没有） */
+const LASTSYNC_KEY = "lifeworkbench.lastsync.v1";
+function lastSyncGet(){ return +localStorage.getItem(LASTSYNC_KEY) || 0; }
+function lastSyncSet(t){ try{ localStorage.setItem(LASTSYNC_KEY, String(t)); }catch(e){} }
 
 /* 手机连电脑时浏览器会先问一次"允许访问本地网络吗"，targetAddressSpace 是给它的说明。
    timeoutMs：连不上电脑时别把页面卡死 —— 在外面连不上是常态。 */
@@ -809,6 +813,7 @@ function pickUpReturn(){
   store = Object.assign(def(), merged);
   lsWrite(store);
   baseWrite(store);   /* 这次同步完的样子，就是下次对账的参照 */
+  lastSyncSet(Date.now());
   try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
   setTimeout(()=>toast("同步完成，电脑上的记录也拿到了"), 700);
   return true;
@@ -1754,7 +1759,14 @@ if(!IS_LOCAL){
   /* 电脑地址（连的是手机热点、或者换了网络时，地址会变 —— 点一下就能改） */
   const ae = document.getElementById("pc-addr");
   if(ae){
-    const show = ()=>{ ae.textContent = "电脑地址：" + String(pcBase()).replace(/^https?:\/\//, ""); };
+    const show = ()=>{
+      const t = lastSyncGet();
+      const when = t
+        ? new Date(t).toLocaleString("zh-CN", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"})
+        : "还没同步过";
+      ae.innerHTML = "电脑地址：" + String(pcBase()).replace(/^https?:\/\//, "")
+                    + "<br>上次同步：" + when;
+    };
     ae.style.display = "";
     show();
     ae.addEventListener("click", ()=>{
