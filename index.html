@@ -698,6 +698,11 @@ function isEmptyStore(s){
 function lsRead(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; } }
 function lsWrite(o){ try{ localStorage.setItem(KEY, JSON.stringify(o)); }catch(e){} }
 
+/* "上次同步完之后的样子" —— 下次对账时用来分清"手机新改的"和"手机上留下的老值" */
+const BASE_KEY = "lifeworkbench.base.v1";
+function baseRead(){ try{ return JSON.parse(localStorage.getItem(BASE_KEY)); }catch(e){ return null; } }
+function baseWrite(o){ try{ localStorage.setItem(BASE_KEY, JSON.stringify(o)); }catch(e){} }
+
 /* 手机连电脑时浏览器会先问一次"允许访问本地网络吗"，targetAddressSpace 是给它的说明。
    timeoutMs：连不上电脑时别把页面卡死 —— 在外面连不上是常态。 */
 async function fetchData(timeoutMs){
@@ -788,6 +793,7 @@ function syncNow(){
   const back = location.origin + location.pathname;
   const url = pcBase() + "/sync.html"
             + "#back=" + encodeURIComponent(back)
+            + "&base=" + encodeURIComponent(JSON.stringify(baseRead() || {}))
             + "&data=" + encodeURIComponent(JSON.stringify(store));
   toast("正在打开电脑上的交接页…");
   location.href = url;
@@ -802,6 +808,7 @@ function pickUpReturn(){
   if(!merged || !merged.workouts) return false;
   store = Object.assign(def(), merged);
   lsWrite(store);
+  baseWrite(store);   /* 这次同步完的样子，就是下次对账的参照 */
   try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
   setTimeout(()=>toast("同步完成，电脑上的记录也拿到了"), 700);
   return true;
