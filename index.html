@@ -469,6 +469,7 @@ h1,h2,h3{font-weight:650;letter-spacing:.01em}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
       <span class="nav-label">同步到电脑</span>
     </button>
+    <div id="pc-addr" style="display:none;margin:2px 0 8px;padding:0 14px;font-size:11px;line-height:1.5;color:var(--side-foot);cursor:pointer;word-break:break-all"></div>
     <div class="nav-foot">
       <div><span class="dot"></span><span id="datapath">数据存在电脑上的文件里</span></div>
       <div style="margin-top:10px"><a class="btn ghost sm" id="export-btn" href="/api/export" style="display:inline-flex;align-items:center;text-decoration:none">导出备份</a></div>
@@ -727,6 +728,8 @@ async function dataLayerInit(){
      手机不往电脑自动推，只有回家点"同步"才并过去；只有第一次用（手机里空的）才从电脑取一份。 */
   if(!IS_LOCAL){
     store = Object.assign(def(), local || {});
+    /* 刚从电脑的交接页跳回来？把合并后的完整数据接住 */
+    const gotBack = pickUpReturn();
     serverReady = false;
     if(isEmptyStore(store)){
       /* 第一次用：背后问问电脑有没有数据。连不上就当空着（在外面连不上是常态），
@@ -775,26 +778,33 @@ function save(){
 }
 
 /* ===== 回家同步（只在手机上用）=====
-   规则：电脑那份是主账本 —— 手机记的并进去，电脑上已有的绝不被手机覆盖。
-   手机同步后不清空，在外面还能翻历史。 */
-async function syncNow(){
+   浏览器不许网页"偷偷"去连局域网里的电脑，但允许"整页跳过去"。
+   所以同步＝带着手机这份数据跳到电脑上的交接页 → 那边合并写盘 → 再跳回来，
+   回程顺手把电脑上的完整数据交还给手机（这就是"电脑改的手机也能看到"）。
+   规则不变：电脑那份是主账本，手机记的并进去，电脑上已有的绝不被手机覆盖。 */
+function syncNow(){
   const btn = document.getElementById("sync-btn");
   if(btn) btn.disabled = true;
-  try{
-    const pcData = await fetchData(8000);                 // 电脑那份（连不上就 8 秒放弃）
-    const clash  = listPhoneOnlyConflicts(pcData, store); // 两边都记过的（只提示，不改结果）
-    const merged = mergeStore(pcData, store);             // 电脑优先 + 手机补空缺
-    await pushData(merged);                               // 写回电脑
-    store = merged; lsWrite(store);                       // 手机上留合并后的完整一份
-    if(typeof render === "function") render(routeNow());
-    toast(clash.length
-      ? "同步完成；有 " + clash.length + " 处两边都记过，按电脑上的为准"
-      : "同步完成，手机记的已并进电脑");
-  }catch(e){
-    toast("没连上电脑 —— 确认手机和电脑连的是同一个 WiFi、电脑开着，浏览器问「允许访问本地网络」时点了允许");
-  }finally{
-    if(btn) btn.disabled = false;
-  }
+  const back = location.origin + location.pathname;
+  const url = pcBase() + "/sync.html"
+            + "#back=" + encodeURIComponent(back)
+            + "&data=" + encodeURIComponent(JSON.stringify(store));
+  toast("正在打开电脑上的交接页…");
+  location.href = url;
+}
+
+/* 从电脑交接页跳回来时，地址栏里带着合并后的完整数据 —— 接住它 */
+function pickUpReturn(){
+  const m = (location.hash || "").match(/[#&]ret=([^&]*)/);
+  if(!m) return false;
+  let merged = null;
+  try{ merged = JSON.parse(decodeURIComponent(m[1])); }catch(e){ return false; }
+  if(!merged || !merged.workouts) return false;
+  store = Object.assign(def(), merged);
+  lsWrite(store);
+  try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+  setTimeout(()=>toast("同步完成，电脑上的记录也拿到了"), 700);
+  return true;
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
 function fmtDate(d){
@@ -1727,12 +1737,28 @@ document.getElementById("todo-today").addEventListener("click",()=>{ curTodo=tod
 /* ===== 启动 ===== */
 dataLayerInit().then(async()=>{ await loadSettings(); calInit(); route(); });
 
-/* ===== 手机版专属：亮出"同步"按钮，并打开离线缓存 ===== */
+/* ===== 手机版专属：亮出"同步"按钮、显示电脑地址、打开离线缓存 ===== */
 if(!IS_LOCAL){
   const sb = document.getElementById("sync-btn");
   if(sb){
     sb.style.display = "";
     sb.addEventListener("click", ()=>{ closeSidebar(); syncNow(); });
+  }
+  /* 电脑地址（连的是手机热点、或者换了网络时，地址会变 —— 点一下就能改） */
+  const ae = document.getElementById("pc-addr");
+  if(ae){
+    const show = ()=>{ ae.textContent = "电脑地址：" + String(pcBase()).replace(/^https?:\/\//, ""); };
+    ae.style.display = "";
+    show();
+    ae.addEventListener("click", ()=>{
+      const v = prompt("电脑在家里网络中的地址\n（形如 192.168.1.5:8750，电脑开着工作台时可以查）", pcBase());
+      if(v === null) return;
+      const t = v.trim().replace(/\/+$/, "");
+      if(!t) return;
+      localStorage.setItem("pcBase", /^https?:\/\//.test(t) ? t : "http://" + t);
+      show();
+      toast("电脑地址已改");
+    });
   }
   if("serviceWorker" in navigator){
     navigator.serviceWorker.register("./sw.js").catch(()=>{});
