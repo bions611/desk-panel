@@ -3,7 +3,7 @@
  * /api/ 开头的请求一律放行、绝不缓存。
  * 跨域请求一律放行、不处理。
  */
-var CACHE_NAME = "panel-v2";
+var CACHE_NAME = "panel-v3";
 
 var PRECACHE_URLS = [
   "./",
@@ -19,7 +19,8 @@ self.addEventListener("install", function (event) {
     caches.open(CACHE_NAME).then(function (cache) {
       return Promise.all(
         PRECACHE_URLS.map(function (url) {
-          return cache.add(url).catch(function (err) {
+          /* no-store：别拿浏览器 HTTP 缓存里的旧版本（Pages 的缓存有 10 分钟） */
+          return cache.add(new Request(url, {cache: "no-store"})).catch(function (err) {
             console.warn("[sw] precache failed:", url, err);
           });
         })
@@ -58,7 +59,7 @@ self.addEventListener("fetch", function (event) {
   if (url.pathname.indexOf("/api/") === 0) return;
 
   event.respondWith(
-    fetch(req).then(function (resp) {
+    fetch(req, {cache: "no-cache"}).then(function (resp) {
       if (resp && resp.ok) {
         var copy = resp.clone();
         caches.open(CACHE_NAME).then(function (cache) {
