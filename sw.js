@@ -3,11 +3,12 @@
  * /api/ 开头的请求一律放行、绝不缓存。
  * 跨域请求一律放行、不处理。
  */
-var CACHE_NAME = "panel-v1";
+var CACHE_NAME = "panel-v2";
 
 var PRECACHE_URLS = [
   "./",
   "./index.html",
+  "./merge.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png"
